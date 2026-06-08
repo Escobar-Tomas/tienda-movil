@@ -92,7 +92,7 @@ export default function GestionClientes() {
       nombre,
       telefono: telefono || null,
       direccion: direccion || null,
-      notas: notas || null
+      referencia_domicilio: notas || null // <--- Aquí enlazamos tu estado 'notas' con la columna real
     };
 
     let error = null;
@@ -265,10 +265,13 @@ export default function GestionClientes() {
         </a>
       </footer>
 
-      {/* MODAL ADAPTADO A INTERFACES TÁCTILES MÓVILES */}
+      {/* MODAL CENTRADO EN TODAS LAS PANTALLAS */}
       {mostrarModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-end sm:items-center justify-center p-2 z-50">
-          <div className="bg-white rounded-t-3xl sm:rounded-3xl p-5 w-full max-w-sm shadow-2xl max-h-[85vh] overflow-y-auto space-y-4 animate-fade-in">
+        // Cambiamos 'items-end sm:items-center' por 'items-center'
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-2 z-50">
+          
+          {/* Contenedor del Modal: Cambiamos 'rounded-t-3xl sm:rounded-3xl' por 'rounded-3xl' */}
+          <div className="bg-white rounded-3xl p-5 w-full max-w-sm shadow-2xl max-h-[85vh] overflow-y-auto space-y-4 animate-fade-in">
             
             <div className="flex justify-between items-center pb-2 border-b border-gray-100">
               <h3 className="text-sm font-black text-gray-900 tracking-tight">

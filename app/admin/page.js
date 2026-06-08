@@ -122,7 +122,7 @@ export default function DashboardAdmin() {
           <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest px-1">Módulos de Trabajo</p>
           
           <a 
-            href="/admin/ventas/nueva"
+            href="/admin/ventas"
             className="w-full bg-gray-900 text-white font-black p-4 rounded-2xl shadow-sm active:scale-[0.98] transition-transform flex items-center justify-between text-xs uppercase tracking-wider"
           >
             <span>📦 Registrar Nueva Venta (Talles)</span>

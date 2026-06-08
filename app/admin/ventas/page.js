@@ -12,6 +12,13 @@ export default function NuevaVenta() {
   const [talleSeleccionado, setTalleSeleccionado] = useState(null);
   const [carrito, setCarrito] = useState([]); // [{ producto_id, variante_id, titulo, talle, precio, cantidad, stockMaximo }]
   
+  // Estados para los buscadores de autocompletado
+  const [buscarCliente, setBuscarCliente] = useState('');
+  const [mostrarSugerenciasClientes, setMostrarSugerenciasClientes] = useState(false);
+
+  const [buscarProducto, setBuscarProducto] = useState('');
+  const [mostrarSugerenciasProductos, setMostrarSugerenciasProductos] = useState(false);
+
   // Estados para cumplir los constraints de 'ventas'
   const [tipoPago, setTipoPago] = useState('Unico'); // 'Unico', 'Semanal', 'Quincenal', 'Mensual'
   const [cuotasPactadas, setCuotasPactadas] = useState('1');
@@ -78,6 +85,7 @@ export default function NuevaVenta() {
 
     setProductoSeleccionado(null);
     setTalleSeleccionado(null);
+    setBuscarProducto(''); // Limpia el buscador de producto tras añadir
   };
 
   // 3. Envío transaccional mapeado exactamente a tus columnas
@@ -136,6 +144,7 @@ export default function NuevaVenta() {
       setMensaje('✅ ¡Venta registrada e inventario por talle actualizado!');
       setCarrito([]);
       setClienteSeleccionado('');
+      setBuscarCliente('');
       setTipoPago('Unico');
       setCuotasPactadas('1');
     } catch (err) {
@@ -159,37 +168,94 @@ export default function NuevaVenta() {
         
         {/* PANEL IZQUIERDO: CLIENTE Y SELECCIÓN DE PRENDAS */}
         <div className="space-y-4">
-          <section className="bg-white p-3 rounded-2xl shadow-sm border border-gray-100">
+          
+          {/* SELECCIONAR COMPRADOR CON CAMPO DE TEXTO E HILO DE COINCIDENCIAS */}
+          <section className="bg-white p-3 rounded-2xl shadow-sm border border-gray-100 relative">
             <label className="block text-[9px] font-black text-gray-400 uppercase tracking-widest">Seleccionar Comprador</label>
-            <select 
-              value={clienteSeleccionado} 
-              onChange={(e) => setClienteSeleccionado(e.target.value)}
-              className="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs bg-white text-gray-900 font-bold focus:outline-none"
-            >
-              <option value="">-- Buscar en la libreta --</option>
-              {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-            </select>
+            <input 
+              type="text"
+              placeholder="🔍 Escribe para buscar en la libreta..."
+              value={buscarCliente}
+              onFocus={() => setMostrarSugerenciasClientes(true)}
+              onBlur={() => setTimeout(() => setMostrarSugerenciasClientes(false), 200)}
+              onChange={(e) => {
+                setBuscarCliente(e.target.value);
+                setClienteSeleccionado(''); // Desmarca el ID interno si sigue modificando el campo
+              }}
+              className="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs bg-white text-gray-900 font-bold focus:outline-none focus:border-indigo-600"
+            />
+            
+            {/* Lista Flotante de Clientes */}
+            {mostrarSugerenciasClientes && (
+              <ul className="absolute left-3 right-3 z-30 bg-white border border-gray-200 rounded-xl shadow-xl max-h-40 overflow-y-auto text-xs mt-1 divide-y divide-gray-50">
+                {clientes
+                  .filter(c => c.nombre.toLowerCase().includes(buscarCliente.toLowerCase()))
+                  .map(c => (
+                    <li
+                      key={c.id}
+                      onMouseDown={() => {
+                        setBuscarCliente(c.nombre);
+                        setClienteSeleccionado(c.id);
+                      }}
+                      className="p-2.5 hover:bg-indigo-50 cursor-pointer font-bold text-gray-800 transition-colors"
+                    >
+                      {c.nombre}
+                    </li>
+                  ))}
+                {clientes.filter(c => c.nombre.toLowerCase().includes(buscarCliente.toLowerCase())).length === 0 && (
+                  <li className="p-2.5 text-gray-400 italic text-center">Sin coincidencias en la libreta</li>
+                )}
+              </ul>
+            )}
           </section>
 
           <section className="bg-white p-3 rounded-2xl shadow-sm border border-gray-100">
             <form onSubmit={agregarAlCarrito} className="space-y-3">
-              <div>
+              
+              {/* SELECCIONAR PRENDA BASE CON CAMPO DE TEXTO E HILO DE COINCIDENCIAS */}
+              <div className="relative">
                 <label className="block text-[9px] font-black text-gray-400 uppercase tracking-widest">Prenda Base</label>
-                <select 
-                  value={productoSeleccionado ? productoSeleccionado.id : ''} 
+                <input 
+                  type="text"
+                  placeholder="🔍 Escribe para buscar artículo..."
+                  value={buscarProducto}
+                  onFocus={() => setMostrarSugerenciasProductos(true)}
+                  onBlur={() => setTimeout(() => setMostrarSugerenciasProductos(false), 200)}
                   onChange={(e) => {
-                    const prod = productos.find(p => p.id === e.target.value);
-                    setProductoSeleccionado(prod);
+                    setBuscarProducto(e.target.value);
+                    setProductoSeleccionado(null);
                     setTalleSeleccionado(null);
                   }}
-                  className="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs bg-gray-50 text-gray-900 font-bold focus:outline-none"
-                >
-                  <option value="">-- Elegir artículo --</option>
-                  {productos.map(p => <option key={p.id} value={p.id}>{p.titulo} - ${p.precio}</option>)}
-                </select>
+                  className="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs bg-gray-50 text-gray-900 font-bold focus:outline-none focus:border-indigo-600"
+                />
+
+                {/* Lista Flotante de Productos */}
+                {mostrarSugerenciasProductos && (
+                  <ul className="absolute left-0 right-0 z-30 bg-white border border-gray-200 rounded-xl shadow-xl max-h-40 overflow-y-auto text-xs mt-1 divide-y divide-gray-50">
+                    {productos
+                      .filter(p => p.titulo.toLowerCase().includes(buscarProducto.toLowerCase()))
+                      .map(p => (
+                        <li
+                          key={p.id}
+                          onMouseDown={() => {
+                            setBuscarProducto(`${p.titulo} - $${p.precio}`);
+                            setProductoSeleccionado(p);
+                            setTalleSeleccionado(null);
+                          }}
+                          className="p-2.5 hover:bg-indigo-50 cursor-pointer flex justify-between items-center text-gray-800 font-bold transition-colors"
+                        >
+                          <span>{p.titulo}</span>
+                          <span className="text-indigo-600">${p.precio}</span>
+                        </li>
+                      ))}
+                    {productos.filter(p => p.titulo.toLowerCase().includes(buscarProducto.toLowerCase())).length === 0 && (
+                      <li className="p-2.5 text-gray-400 italic text-center">Sin coincidencias en stock</li>
+                    )}
+                  </ul>
+                )}
               </div>
 
-              {/* SELECTOR DE BURBUJAS ERGONÓMICO */}
+              {/* SELECTOR DE BURBUJAS ERGONÓMICO (Se mantiene intacto) */}
               {productoSeleccionado && (
                 <div className="space-y-1.5 animate-fade-in bg-gray-50/50 p-2 rounded-xl border border-gray-100">
                   <label className="block text-[9px] font-black text-gray-400 uppercase tracking-widest">Curva de Talles en Mochila</label>
