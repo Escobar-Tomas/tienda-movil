@@ -1,173 +1,144 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { supabase } from '../../utils/supabase';
+import { useRouter } from 'next/navigation';
+import { dashboardService } from '@/services/dashboardService';
+import { authService } from '@/services/authService';
 
 export default function DashboardAdmin() {
-  // Estados para las métricas del panel
-  const [capitalEnCalle, setCapitalEnCalle] = useState(0);
-  const [recaudacionTotal, setRecaudacionTotal] = useState(0);
-  const [prendasEnMochila, setPrendasEnMochila] = useState(0);
-  const [totalClientes, setTotalClientes] = useState(0);
-  
-  // Controles de estado
+  const [metricas, setMetricas] = useState(null);
   const [cargando, setCargando] = useState(true);
+  const router = useRouter();
 
-  // Función central para consolidar las métricas reales
-  const calcularMetricas = async () => {
-    setCargando(true);
+  useEffect(() => {
+    async function cargarDashboard() {
+      try {
+        const data = await dashboardService.obtenerMetricas();
+        setMetricas(data);
+      } catch (error) {
+        console.error("Error al cargar métricas:", error);
+      } finally {
+        setCargando(false);
+      }
+    }
+    cargarDashboard();
+  }, []);
+
+  const cerrarSesion = async () => {
+    if (!confirm('¿Estás seguro de que deseas salir del panel?')) return;
     try {
-      const { count: countClientes } = await supabase
-        .from('clientes')
-        .select('*', { count: 'exact', head: true });
-      setTotalClientes(countClientes || 0);
-
-      const { data: dataStocks } = await supabase
-        .from('stock_variantes')
-        .select('stock');
-      const sumaStock = dataStocks?.reduce((acc, curr) => acc + (curr.stock || 0), 0) || 0;
-      setPrendasEnMochila(sumaStock);
-
-      const { data: dataPagos } = await supabase
-        .from('pagos')
-        .select('monto_pagado');
-      const sumaPagos = dataPagos?.reduce((acc, curr) => acc + parseFloat(curr.monto_pagado || 0), 0) || 0;
-      setRecaudacionTotal(sumaPagos);
-
-      const { data: dataVentas } = await supabase
-        .from('ventas')
-        .select('total');
-      const sumaVentas = dataVentas?.reduce((acc, curr) => acc + parseFloat(curr.total || 0), 0) || 0;
-      
-      const enCalle = sumaVentas - sumaPagos;
-      setCapitalEnCalle(enCalle < 0 ? 0 : enCalle);
-
+      await authService.logout();
+      router.push('/login');
     } catch (error) {
-      console.error("Error consolidando el panel:", error);
-    } finally {
-      setCargando(false);
+      alert("No se pudo cerrar sesión.");
     }
   };
 
-  useEffect(() => {
-    calcularMetricas();
-  }, []);
-
   return (
-    <div className="bg-gray-100 min-h-screen pb-12 font-sans text-gray-900 selection:bg-indigo-100">
+    <div className="bg-slate-50 min-h-screen pb-10 font-sans text-slate-900 selection:bg-indigo-100">
       
-      {/* CABECERA PRINCIPAL */}
-      <header className="bg-indigo-700 text-white px-6 py-6 shadow-md rounded-b-[2.5rem] w-full sticky top-0 z-10">
-        <div className="max-w-md mx-auto flex justify-between items-center">
-          <div>
-            <p className="text-[10px] font-black text-indigo-200 uppercase tracking-widest">Panel de Control</p>
-            <h1 className="text-xl font-black tracking-tight mt-0.5">SISTEMA DE GESTIÓN</h1>
-          </div>
-          <button 
-            onClick={calcularMetricas} disabled={cargando}
-            className="w-9 h-9 rounded-xl bg-indigo-600 active:scale-95 transition-transform flex items-center justify-center font-bold text-sm shadow-xs"
-          >
-            {cargando ? '...' : '🔄'}
-          </button>
+      {/* CABECERA */}
+      <header className="bg-indigo-700 text-white px-5 py-5 shadow-lg flex justify-between items-center rounded-b-3xl">
+        <div>
+          <h1 className="text-xl font-black tracking-tight">Panel de Control</h1>
+          <p className="text-indigo-200 text-xs font-bold mt-1">Resumen en tiempo real</p>
         </div>
+        <button 
+          onClick={cerrarSesion}
+          className="bg-indigo-800/50 hover:bg-indigo-900 text-white text-[10px] font-black uppercase tracking-widest px-3 py-2 rounded-xl border border-indigo-600/50 transition-colors cursor-pointer"
+        >
+          Cerrar Sesión
+        </button>
       </header>
 
-      {/* CUERPO CENTRAL */}
-      <main className="p-4 max-w-md mx-auto space-y-5">
+      <main className="p-4 space-y-6 max-w-4xl mx-auto -mt-2">
         
-        {/* TARJETAS DE MÉTRICAS */}
-        <section className="grid grid-cols-2 gap-3">
-          <div className="bg-white p-4 rounded-3xl border border-gray-100 shadow-xs flex flex-col justify-between">
-            <div>
-              <span className="text-[20px] mb-1 block">📈</span>
-              <p className="text-[9px] font-black text-gray-400 uppercase tracking-wider leading-tight">Capital en la Calle</p>
-            </div>
-            <p className="text-base font-black text-red-600 mt-2 truncate">
-              {cargando ? '...' : `$${capitalEnCalle.toLocaleString('es-AR')}`}
-            </p>
+        {/* SECCIÓN 1: TARJETAS DE MÉTRICAS (KPIs) */}
+        {cargando ? (
+          <div className="grid grid-cols-2 gap-3 animate-pulse">
+            {[1,2,3,4].map(i => <div key={i} className="bg-slate-200 h-24 rounded-2xl"></div>)}
           </div>
-
-          <div className="bg-white p-4 rounded-3xl border border-gray-100 shadow-xs flex flex-col justify-between">
-            <div>
-              <span className="text-[20px] mb-1 block">💰</span>
-              <p className="text-[9px] font-black text-gray-400 uppercase tracking-wider leading-tight">Caja / Recaudado</p>
+        ) : metricas && (
+          <section className="grid grid-cols-2 gap-3">
+            <div className="bg-white p-4 rounded-3xl shadow-sm border border-slate-100 flex flex-col justify-center relative overflow-hidden">
+              <div className="absolute top-0 right-0 p-3 opacity-10 text-3xl">📈</div>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Ventas del Mes</p>
+              <p className="text-xl font-black text-slate-800 mt-1">${metricas.ventasMes.toLocaleString('es-AR')}</p>
             </div>
-            <p className="text-base font-black text-emerald-600 mt-2 truncate">
-              {cargando ? '...' : `$${recaudacionTotal.toLocaleString('es-AR')}`}
-            </p>
-          </div>
-
-          <div className="bg-white p-4 rounded-3xl border border-gray-100 shadow-xs flex flex-col justify-between">
-            <div>
-              <span className="text-[20px] mb-1 block">👕</span>
-              <p className="text-[9px] font-black text-gray-400 uppercase tracking-wider leading-tight">Prendas en Stock</p>
+            
+            <div className="bg-gradient-to-br from-amber-50 to-orange-50 p-4 rounded-3xl shadow-sm border border-amber-100 flex flex-col justify-center relative overflow-hidden">
+              <div className="absolute top-0 right-0 p-3 opacity-10 text-3xl">⏳</div>
+              <p className="text-[10px] font-black text-amber-600 uppercase tracking-widest">Dinero en la Calle</p>
+              <p className="text-xl font-black text-amber-700 mt-1">${metricas.dineroEnLaCalle.toLocaleString('es-AR')}</p>
             </div>
-            <p className="text-base font-black text-gray-800 mt-2">
-              {cargando ? '...' : `${prendasEnMochila} u.`}
-            </p>
-          </div>
 
-          <div className="bg-white p-4 rounded-3xl border border-gray-100 shadow-xs flex flex-col justify-between">
-            <div>
-              <span className="text-[20px] mb-1 block">👤</span>
-              <p className="text-[9px] font-black text-gray-400 uppercase tracking-wider leading-tight">Libreta Clientes</p>
+            <div className="bg-white p-4 rounded-3xl shadow-sm border border-slate-100 flex flex-col justify-center relative overflow-hidden">
+              <div className="absolute top-0 right-0 p-3 opacity-10 text-3xl">👥</div>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Cartera de Clientes</p>
+              <p className="text-xl font-black text-slate-800 mt-1">{metricas.clientesActivos}</p>
             </div>
-            <p className="text-base font-black text-indigo-600 mt-2">
-              {cargando ? '...' : `${totalClientes} reg.`}
-            </p>
+
+            <div className="bg-white p-4 rounded-3xl shadow-sm border border-slate-100 flex flex-col justify-center relative overflow-hidden">
+              <div className="absolute top-0 right-0 p-3 opacity-10 text-3xl">📦</div>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Alertas de Stock</p>
+              <p className="text-xl font-black text-red-600 mt-1">{metricas.alertasStock.length}</p>
+            </div>
+          </section>
+        )}
+
+        {/* SECCIÓN 2: ACCESOS DIRECTOS (Menú de Navegación) */}
+        <section className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100">
+          <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4 border-b border-slate-50 pb-2">Acciones Rápidas</h2>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            
+            <a href="/admin/ventas" className="bg-indigo-50 hover:bg-indigo-600 text-indigo-700 hover:text-white p-4 rounded-2xl flex flex-col items-center justify-center transition-all group cursor-pointer border border-indigo-100 hover:border-transparent shadow-sm">
+              <span className="text-2xl mb-2 group-hover:scale-110 transition-transform">🛒</span>
+              <span className="text-[10px] font-black uppercase tracking-widest">Vender</span>
+            </a>
+            
+            <a href="/admin/cobros" className="bg-emerald-50 hover:bg-emerald-600 text-emerald-700 hover:text-white p-4 rounded-2xl flex flex-col items-center justify-center transition-all group cursor-pointer border border-emerald-100 hover:border-transparent shadow-sm">
+              <span className="text-2xl mb-2 group-hover:scale-110 transition-transform">💵</span>
+              <span className="text-[10px] font-black uppercase tracking-widest">Cobrar</span>
+            </a>
+            
+            <a href="/admin/productos" className="bg-blue-50 hover:bg-blue-600 text-blue-700 hover:text-white p-4 rounded-2xl flex flex-col items-center justify-center transition-all group cursor-pointer border border-blue-100 hover:border-transparent shadow-sm">
+              <span className="text-2xl mb-2 group-hover:scale-110 transition-transform">📦</span>
+              <span className="text-[10px] font-black uppercase tracking-widest">Inventario</span>
+            </a>
+            
+            <a href="/admin/clientes" className="bg-slate-100 hover:bg-slate-800 text-slate-600 hover:text-white p-4 rounded-2xl flex flex-col items-center justify-center transition-all group cursor-pointer border border-slate-200 hover:border-transparent shadow-sm">
+              <span className="text-2xl mb-2 group-hover:scale-110 transition-transform">📒</span>
+              <span className="text-[10px] font-black uppercase tracking-widest">Clientes</span>
+            </a>
+
           </div>
         </section>
 
-        {/* MÓDULOS DE TRABAJO (Con botón de clientes agregado) */}
-        <section className="space-y-2.5">
-          <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest px-1">Módulos de Trabajo</p>
-          
-          <a 
-            href="/admin/ventas"
-            className="w-full bg-gray-900 text-white font-black p-4 rounded-2xl shadow-sm active:scale-[0.98] transition-transform flex items-center justify-between text-xs uppercase tracking-wider"
-          >
-            <span>📦 Registrar Nueva Venta (Talles)</span>
-            <span className="text-gray-400 text-base">➔</span>
-          </a>
-
-          <a 
-            href="/admin/cobros"
-            className="w-full bg-white border border-gray-200 font-black p-4 rounded-2xl shadow-xs active:scale-[0.98] transition-transform flex items-center justify-between text-xs text-indigo-700 uppercase tracking-wider"
-          >
-            <span>💵 Módulo de Cobranzas Predictivo</span>
-            <span className="text-indigo-300 text-base">➔</span>
-          </a>
-
-          {/* ¡EL BOTÓN QUE FALTABA!: Acceso a la Libreta de Clientes */}
-          <a 
-            href="/admin/clientes"
-            className="w-full bg-white border border-gray-200 font-black p-4 rounded-2xl shadow-xs active:scale-[0.98] transition-transform flex items-center justify-between text-xs text-indigo-900 uppercase tracking-wider"
-          >
-            <span>👤 Libreta de Clientes / Direcciones</span>
-            <span className="text-indigo-300 text-base">➔</span>
-          </a>
-
-          <a 
-            href="/admin/productos"
-            className="w-full bg-white border border-gray-200 font-black p-4 rounded-2xl shadow-xs active:scale-[0.98] transition-transform flex items-center justify-between text-xs text-gray-700 uppercase tracking-wider"
-          >
-            <span>👕 Control de Inventario / Catálogo</span>
-            <span className="text-gray-400 text-base">➔</span>
-          </a>
-        </section>
-
-        {/* ACCESO AL CATÁLOGO PÚBLICO */}
-        <section className="pt-2 border-t border-dashed border-gray-200">
-          <a 
-            href="/" 
-            target="_blank" 
-            className="w-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold p-3.5 rounded-xl text-center block text-xs transition-colors uppercase tracking-widest"
-          >
-            🌐 Ver Catálogo Público de Clientes
-          </a>
-        </section>
+        {/* SECCIÓN 3: ALERTAS DE INVENTARIO */}
+        {metricas && metricas.alertasStock.length > 0 && (
+          <section className="bg-red-50 p-5 rounded-3xl shadow-sm border border-red-100">
+            <h2 className="text-xs font-black text-red-600 uppercase tracking-widest mb-3 flex items-center gap-2">
+              <span>⚠️</span> Stock Crítico Detectado
+            </h2>
+            <div className="space-y-2">
+              {metricas.alertasStock.map(alerta => (
+                <div key={alerta.id} className="flex justify-between items-center bg-white p-3 rounded-xl border border-red-100/50 shadow-xs">
+                  <div>
+                    <p className="text-xs font-black text-slate-800">{alerta.productos.titulo}</p>
+                    <p className="text-[10px] font-bold text-slate-400">Talle: {alerta.talle}</p>
+                  </div>
+                  <div className="bg-red-100 text-red-700 px-3 py-1.5 rounded-lg text-xs font-black">
+                    Quedan {alerta.stock}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <a href="/admin/productos" className="block text-center mt-4 text-[10px] font-black text-red-500 hover:text-red-700 uppercase tracking-widest">
+              Ir a reponer inventario →
+            </a>
+          </section>
+        )}
 
       </main>
-
     </div>
   );
 }

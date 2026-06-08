@@ -1,58 +1,60 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { supabase } from '../../../utils/supabase';
+import { clientesService } from '@/services/clientesService';
+import { productosService } from '@/services/productosService';
+import { ventasService } from '@/services/ventasService';
 
 export default function NuevaVenta() {
   const [clientes, setClientes] = useState([]);
   const [productos, setProductos] = useState([]);
 
-  // Estados del Formulario y Carrito
   const [clienteSeleccionado, setClienteSeleccionado] = useState('');
   const [productoSeleccionado, setProductoSeleccionado] = useState(null);
   const [talleSeleccionado, setTalleSeleccionado] = useState(null);
-  const [carrito, setCarrito] = useState([]); // [{ producto_id, variante_id, titulo, talle, precio, cantidad, stockMaximo }]
+  const [carrito, setCarrito] = useState([]); 
   
-  // Estados para los buscadores de autocompletado
   const [buscarCliente, setBuscarCliente] = useState('');
   const [mostrarSugerenciasClientes, setMostrarSugerenciasClientes] = useState(false);
 
   const [buscarProducto, setBuscarProducto] = useState('');
   const [mostrarSugerenciasProductos, setMostrarSugerenciasProductos] = useState(false);
 
-  // Estados para cumplir los constraints de 'ventas'
-  const [tipoPago, setTipoPago] = useState('Unico'); // 'Unico', 'Semanal', 'Quincenal', 'Mensual'
+  const [tipoPago, setTipoPago] = useState('Unico');
   const [cuotasPactadas, setCuotasPactadas] = useState('1');
+  
+  const [realizaAbono, setRealizaAbono] = useState(false);
+  const [montoAbonado, setMontoAbonado] = useState('');
+  const [metodoPagoAbono, setMetodoPagoAbono] = useState('Efectivo');
 
   const [cargando, setCargando] = useState(false);
   const [mensaje, setMensaje] = useState('');
 
-  // 1. Cargar datos iniciales respetando la relación con stock_variantes
+  const totalVenta = carrito.reduce((acc, item) => acc + (item.precio * item.cantidad), 0);
+
   useEffect(() => {
     async function cargarDatos() {
-      const { data: dataClientes } = await supabase.from('clientes').select('*').order('nombre');
-      if (dataClientes) setClientes(dataClientes);
-
-      const { data: dataProductos } = await supabase
-        .from('productos')
-        .select(`
-          id,
-          titulo,
-          precio,
-          stock_variantes (
-            id,
-            talle,
-            stock
-          )
-        `)
-        .eq('activo', true)
-        .order('titulo');
-      
-      if (dataProductos) setProductos(dataProductos);
+      try {
+        const [dataClientes, dataProductos] = await Promise.all([
+          clientesService.obtenerTodos(),
+          productosService.obtenerParaVentas()
+        ]);
+        if (dataClientes) setClientes(dataClientes);
+        if (dataProductos) setProductos(dataProductos);
+      } catch (error) {
+        console.error("Error cargando catálogos:", error);
+      }
     }
     cargarDatos();
   }, []);
 
-  // 2. Controlar la adición de prendas por talle al carrito móvil
+  const handleCambioTipoPago = (e) => {
+    const nuevoTipo = e.target.value;
+    setTipoPago(nuevoTipo);
+    if (nuevoTipo === 'Unico') {
+      setCuotasPactadas('1');
+    }
+  };
+
   const agregarAlCarrito = (e) => {
     e.preventDefault();
     if (!productoSeleccionado || !talleSeleccionado) {
@@ -63,13 +65,11 @@ export default function NuevaVenta() {
     const existe = carrito.find(item => item.variante_id === talleSeleccionado.id);
     if (existe) {
       if (existe.cantidad >= talleSeleccionado.stock) {
-        alert(`Stock insuficiente en mochila. Solo quedan ${talleSeleccionado.stock} unidades de este talle.`);
+        alert(`Stock insuficiente. Solo quedan ${talleSeleccionado.stock} unidades de este talle.`);
         return;
       }
       setCarrito(carrito.map(item => 
-        item.variante_id === talleSeleccionado.id 
-          ? { ...item, cantidad: item.cantidad + 1 } 
-          : item
+        item.variante_id === talleSeleccionado.id ? { ...item, cantidad: item.cantidad + 1 } : item
       ));
     } else {
       setCarrito([...carrito, {
@@ -82,73 +82,61 @@ export default function NuevaVenta() {
         stockMaximo: talleSeleccionado.stock
       }]);
     }
-
     setProductoSeleccionado(null);
     setTalleSeleccionado(null);
-    setBuscarProducto(''); // Limpia el buscador de producto tras añadir
+    setBuscarProducto('');
   };
 
-  // 3. Envío transaccional mapeado exactamente a tus columnas
+  // NUEVO: Función para quitar un producto específico del carrito si hubo un error
+  const quitarDelCarrito = (variante_id) => {
+    setCarrito(carrito.filter(item => item.variante_id !== variante_id));
+  };
+
   const finalizarVenta = async () => {
     if (!clienteSeleccionado || carrito.length === 0) {
       alert('Faltan datos del cliente o productos en el carrito.');
+      return;
+    }
+    
+    if (realizaAbono && montoAbonado && parseFloat(montoAbonado) > totalVenta) {
+      alert('El monto abonado no puede superar el total de la venta.');
       return;
     }
 
     setCargando(true);
     setMensaje('');
 
-    const totalVenta = carrito.reduce((acc, item) => acc + (item.precio * item.cantidad), 0);
+    const payloadVenta = {
+      cliente_id: clienteSeleccionado,
+      total: parseFloat(totalVenta),
+      tipo_pago: tipoPago,
+      cuotas_pactadas: parseInt(cuotasPactadas)
+    };
 
-    // PASO A: Inserción estricta en 'ventas' (coincidencia de nombres y constraints)
-    const { data: ventaNueva, error: errorVenta } = await supabase
-      .from('ventas')
-      .insert([
-        {
-          cliente_id: clienteSeleccionado,
-          total: parseFloat(totalVenta),
-          tipo_pago: tipoPago, // 'Unico', 'Semanal', 'Quincenal', 'Mensual'
-          cuotas_pactadas: parseInt(cuotasPactadas)
-        }
-      ])
-      .select()
-      .single();
+    const pagoInicial = (realizaAbono && montoAbonado && parseFloat(montoAbonado) > 0) ? {
+      monto: parseFloat(montoAbonado),
+      metodo: metodoPagoAbono
+    } : null;
 
-    if (errorVenta) {
-      setMensaje(`❌ Error en tabla ventas: ${errorVenta.message}`);
-      setCargando(false);
-      return;
-    }
-
-    // PASO B: Inserción en 'detalles_venta' y rebaja en 'stock_variantes'
     try {
-      for (const item of carrito) {
-        // Estructura exacta de tu tabla detalles_venta
-        await supabase.from('detalles_venta').insert([
-          {
-            venta_id: ventaNueva.id,
-            producto_id: item.producto_id,
-            cantidad: parseInt(item.cantidad),
-            precio_unitario: parseFloat(item.precio)
-          }
-        ]);
-
-        // Descuento físico en la tabla hija stock_variantes
-        const nuevoStock = item.stockMaximo - item.cantidad;
-        await supabase
-          .from('stock_variantes')
-          .update({ stock: nuevoStock })
-          .eq('id', item.variante_id);
-      }
-
-      setMensaje('✅ ¡Venta registrada e inventario por talle actualizado!');
+      await ventasService.registrarNuevaVenta(payloadVenta, carrito, pagoInicial);
+      
+      setMensaje('✅ ¡Operación exitosa! Venta e inventario actualizados.');
+      
       setCarrito([]);
       setClienteSeleccionado('');
       setBuscarCliente('');
       setTipoPago('Unico');
       setCuotasPactadas('1');
-    } catch (err) {
-      setMensaje('❌ Error al procesar los artículos del pedido.');
+      setRealizaAbono(false);
+      setMontoAbonado('');
+      
+      const dataProductosActualizados = await productosService.obtenerParaVentas();
+      setProductos(dataProductosActualizados);
+      
+      setTimeout(() => setMensaje(''), 3000);
+    } catch (error) {
+      setMensaje(`❌ Error al procesar: ${error.message || 'Fallo transaccional'}`);
     } finally {
       setCargando(false);
     }
@@ -158,223 +146,189 @@ export default function NuevaVenta() {
     <div className="bg-gray-100 min-h-screen pb-24 font-sans text-gray-900 selection:bg-indigo-100">
       
       <header className="bg-indigo-700 text-white px-4 py-4 shadow-md sticky top-0 z-10 flex justify-between items-center w-full">
-        <h1 className="text-base font-black tracking-wider uppercase">📦 NUEVA VENTA POR TALLE</h1>
+        <h1 className="text-base font-black tracking-wider uppercase">📦 NUEVA VENTA</h1>
         <span className="text-xs bg-indigo-600 px-2.5 py-1 rounded-lg font-black">
           🛒 {carrito.reduce((acc, i) => acc + i.cantidad, 0)} u.
         </span>
       </header>
 
-      <main className="p-3 space-y-4 max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-4">
+      <main className="p-3 space-y-4 max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-4">
         
-        {/* PANEL IZQUIERDO: CLIENTE Y SELECCIÓN DE PRENDAS */}
+        {/* PANEL IZQUIERDO: SELECCIÓN */}
         <div className="space-y-4">
-          
-          {/* SELECCIONAR COMPRADOR CON CAMPO DE TEXTO E HILO DE COINCIDENCIAS */}
-          <section className="bg-white p-3 rounded-2xl shadow-sm border border-gray-100 relative">
+          <section className="bg-white p-3 rounded-2xl shadow-sm border border-gray-100 relative z-40">
             <label className="block text-[9px] font-black text-gray-400 uppercase tracking-widest">Seleccionar Comprador</label>
             <input 
-              type="text"
-              placeholder="🔍 Escribe para buscar en la libreta..."
-              value={buscarCliente}
+              type="text" placeholder="🔍 Escribe para buscar cliente..." value={buscarCliente}
               onFocus={() => setMostrarSugerenciasClientes(true)}
               onBlur={() => setTimeout(() => setMostrarSugerenciasClientes(false), 200)}
-              onChange={(e) => {
-                setBuscarCliente(e.target.value);
-                setClienteSeleccionado(''); // Desmarca el ID interno si sigue modificando el campo
-              }}
-              className="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs bg-white text-gray-900 font-bold focus:outline-none focus:border-indigo-600"
+              onChange={(e) => { setBuscarCliente(e.target.value); setClienteSeleccionado(''); }}
+              className="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs bg-white focus:outline-none focus:border-indigo-600 font-bold"
             />
-            
-            {/* Lista Flotante de Clientes */}
             {mostrarSugerenciasClientes && (
-              <ul className="absolute left-3 right-3 z-30 bg-white border border-gray-200 rounded-xl shadow-xl max-h-40 overflow-y-auto text-xs mt-1 divide-y divide-gray-50">
-                {clientes
-                  .filter(c => c.nombre.toLowerCase().includes(buscarCliente.toLowerCase()))
-                  .map(c => (
-                    <li
-                      key={c.id}
-                      onMouseDown={() => {
-                        setBuscarCliente(c.nombre);
-                        setClienteSeleccionado(c.id);
-                      }}
-                      className="p-2.5 hover:bg-indigo-50 cursor-pointer font-bold text-gray-800 transition-colors"
-                    >
-                      {c.nombre}
-                    </li>
-                  ))}
-                {clientes.filter(c => c.nombre.toLowerCase().includes(buscarCliente.toLowerCase())).length === 0 && (
-                  <li className="p-2.5 text-gray-400 italic text-center">Sin coincidencias en la libreta</li>
-                )}
+              <ul className="absolute left-3 right-3 bg-white border border-gray-200 rounded-xl shadow-xl max-h-40 overflow-y-auto text-xs mt-1 divide-y divide-gray-50">
+                {clientes.filter(c => c.nombre.toLowerCase().includes(buscarCliente.toLowerCase())).map(c => (
+                  <li key={c.id} onMouseDown={() => { setBuscarCliente(c.nombre); setClienteSeleccionado(c.id); }} className="p-2.5 hover:bg-indigo-50 cursor-pointer font-bold transition-colors">{c.nombre}</li>
+                ))}
               </ul>
             )}
           </section>
 
-          <section className="bg-white p-3 rounded-2xl shadow-sm border border-gray-100">
+          <section className="bg-white p-3 rounded-2xl shadow-sm border border-gray-100 relative z-30">
             <form onSubmit={agregarAlCarrito} className="space-y-3">
-              
-              {/* SELECCIONAR PRENDA BASE CON CAMPO DE TEXTO E HILO DE COINCIDENCIAS */}
-              <div className="relative">
+              <div>
                 <label className="block text-[9px] font-black text-gray-400 uppercase tracking-widest">Prenda Base</label>
                 <input 
-                  type="text"
-                  placeholder="🔍 Escribe para buscar artículo..."
-                  value={buscarProducto}
+                  type="text" placeholder="🔍 Escribe para buscar artículo..." value={buscarProducto}
                   onFocus={() => setMostrarSugerenciasProductos(true)}
                   onBlur={() => setTimeout(() => setMostrarSugerenciasProductos(false), 200)}
-                  onChange={(e) => {
-                    setBuscarProducto(e.target.value);
-                    setProductoSeleccionado(null);
-                    setTalleSeleccionado(null);
-                  }}
-                  className="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs bg-gray-50 text-gray-900 font-bold focus:outline-none focus:border-indigo-600"
+                  onChange={(e) => { setBuscarProducto(e.target.value); setProductoSeleccionado(null); setTalleSeleccionado(null); }}
+                  className="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs bg-gray-50 focus:outline-none focus:border-indigo-600 font-bold"
                 />
-
-                {/* Lista Flotante de Productos */}
                 {mostrarSugerenciasProductos && (
-                  <ul className="absolute left-0 right-0 z-30 bg-white border border-gray-200 rounded-xl shadow-xl max-h-40 overflow-y-auto text-xs mt-1 divide-y divide-gray-50">
-                    {productos
-                      .filter(p => p.titulo.toLowerCase().includes(buscarProducto.toLowerCase()))
-                      .map(p => (
-                        <li
-                          key={p.id}
-                          onMouseDown={() => {
-                            setBuscarProducto(`${p.titulo} - $${p.precio}`);
-                            setProductoSeleccionado(p);
-                            setTalleSeleccionado(null);
-                          }}
-                          className="p-2.5 hover:bg-indigo-50 cursor-pointer flex justify-between items-center text-gray-800 font-bold transition-colors"
-                        >
-                          <span>{p.titulo}</span>
-                          <span className="text-indigo-600">${p.precio}</span>
-                        </li>
-                      ))}
-                    {productos.filter(p => p.titulo.toLowerCase().includes(buscarProducto.toLowerCase())).length === 0 && (
-                      <li className="p-2.5 text-gray-400 italic text-center">Sin coincidencias en stock</li>
-                    )}
+                  <ul className="absolute left-0 right-0 bg-white border border-gray-200 rounded-xl shadow-xl max-h-40 overflow-y-auto text-xs mt-1 divide-y divide-gray-50">
+                    {productos.filter(p => p.titulo.toLowerCase().includes(buscarProducto.toLowerCase())).map(p => (
+                      <li key={p.id} onMouseDown={() => { setBuscarProducto(`${p.titulo} - $${p.precio}`); setProductoSeleccionado(p); setTalleSeleccionado(null); }} className="p-2.5 hover:bg-indigo-50 cursor-pointer flex justify-between items-center font-bold">
+                        <span>{p.titulo}</span> <span className="text-indigo-600">${p.precio}</span>
+                      </li>
+                    ))}
                   </ul>
                 )}
               </div>
 
-              {/* SELECTOR DE BURBUJAS ERGONÓMICO (Se mantiene intacto) */}
               {productoSeleccionado && (
-                <div className="space-y-1.5 animate-fade-in bg-gray-50/50 p-2 rounded-xl border border-gray-100">
-                  <label className="block text-[9px] font-black text-gray-400 uppercase tracking-widest">Curva de Talles en Mochila</label>
+                <div className="space-y-1.5 bg-gray-50/50 p-2 rounded-xl border border-gray-100 animate-fade-in">
+                  <label className="block text-[9px] font-black text-gray-400 uppercase tracking-widest">Talles Disponibles</label>
                   <div className="flex flex-wrap gap-1.5">
                     {productoSeleccionado.stock_variantes?.map((v) => {
                       const tieneStock = v.stock > 0;
-                      const esElElegido = talleSeleccionado?.id === v.id;
-                      
                       return (
-                        <button
-                          key={v.id} type="button" disabled={!tieneStock}
-                          onClick={() => setTalleSeleccionado(v)}
-                          className={`px-3 py-2 text-xs font-black rounded-xl border transition-all flex flex-col items-center min-w-[55px]
-                            ${!tieneStock ? 'bg-gray-100 text-gray-300 border-gray-100 line-through cursor-not-allowed' : 'bg-white text-gray-700 border-gray-200 active:bg-gray-50'}
-                            ${esElElegido ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs scale-95' : ''}
-                          `}
+                        <button key={v.id} type="button" disabled={!tieneStock} onClick={() => setTalleSeleccionado(v)}
+                          className={`px-3 py-2 text-xs font-black rounded-xl border flex flex-col items-center min-w-[55px] transition-all ${!tieneStock ? 'bg-gray-100 text-gray-300 border-gray-100 line-through' : 'bg-white text-gray-700 border-gray-200 hover:bg-indigo-50'} ${talleSeleccionado?.id === v.id ? 'bg-indigo-600 text-white border-indigo-600 scale-95' : ''}`}
                         >
                           <span>{v.talle}</span>
-                          <span className={`text-[8px] font-medium ${esElElegido ? 'text-indigo-200' : 'text-gray-400'}`}>
-                            {tieneStock ? `${v.stock}u` : '0u'}
-                          </span>
+                          <span className="text-[8px]">{tieneStock ? `${v.stock}u` : '0u'}</span>
                         </button>
                       );
                     })}
                   </div>
                 </div>
               )}
-
-              <button 
-                type="submit"
-                className="w-full bg-gray-900 text-white font-bold py-2.5 rounded-xl text-xs uppercase tracking-wider active:scale-[0.98] transition-transform"
-              >
-                ＋ Cargar al carrito
-              </button>
+              <button type="submit" className="w-full bg-slate-900 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl text-xs uppercase tracking-widest cursor-pointer transition-colors">➕ Cargar al carrito</button>
             </form>
           </section>
         </div>
 
-        {/* PANEL DERECHO: PLANIFICACIÓN DE COBRO Y CARRITO */}
+        {/* PANEL DERECHO: DETALLE, RESUMEN Y PLAN DE PAGOS */}
         <div className="space-y-4">
-          <section className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 space-y-4">
-            <h3 className="text-xs font-black text-gray-400 uppercase tracking-wider">Resumen de Venta</h3>
+          <section className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 space-y-4 flex flex-col h-full">
             
-            {carrito.length === 0 ? (
-              <p className="text-xs text-gray-400 text-center py-4 font-medium italic">Ningún artículo seleccionado.</p>
-            ) : (
-              <div className="divide-y divide-gray-50 max-h-40 overflow-y-auto pr-1">
-                {carrito.map((item, idx) => (
-                  <div key={idx} className="py-2 flex justify-between items-center text-xs">
-                    <div>
-                      <p className="font-extrabold text-gray-800 truncate">{item.titulo}</p>
-                      <p className="text-[10px] text-indigo-600 font-bold">Talle: {item.talle} • {item.cantidad} u. x ${item.precio}</p>
+            {/* NUEVO: LISTADO DETALLADO DEL CARRITO */}
+            <div>
+              <h3 className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-2 border-b border-gray-50 pb-1">Detalle del Pedido</h3>
+              <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                {carrito.length === 0 ? (
+                  <p className="text-xs text-center text-gray-400 italic py-6 bg-gray-50 rounded-xl border border-dashed border-gray-200">El carrito está vacío.</p>
+                ) : (
+                  carrito.map((item, index) => (
+                    <div key={index} className="flex justify-between items-center bg-gray-50 p-2.5 rounded-xl border border-gray-100 animate-fade-in">
+                      <div className="flex-1">
+                        <p className="text-[11px] font-black text-gray-800 leading-tight">{item.titulo}</p>
+                        <p className="text-[10px] font-bold text-gray-500 mt-0.5">
+                          Talle: <span className="text-indigo-600 bg-indigo-50 px-1 rounded">{item.talle}</span> | {item.cantidad} x ${item.precio}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs font-black text-slate-800">${(item.cantidad * item.precio).toLocaleString('es-AR')}</span>
+                        <button type="button" onClick={() => quitarDelCarrito(item.variante_id)} className="text-[10px] bg-red-100 text-red-600 hover:bg-red-200 px-2 py-1.5 rounded-lg font-black cursor-pointer transition-colors" title="Quitar">
+                          ❌
+                        </button>
+                      </div>
                     </div>
-                    <p className="font-black text-gray-900">${(item.precio * item.cantidad).toFixed(2)}</p>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
-            )}
-
-            <div className="bg-indigo-50/50 p-3 rounded-xl border border-indigo-100/50 flex justify-between items-center">
-              <span className="text-[9px] font-black text-indigo-700 uppercase tracking-wider">Total del Pedido</span>
-              <span className="text-base font-black text-indigo-900">
-                ${carrito.reduce((acc, i) => acc + (i.precio * i.cantidad), 0).toFixed(2)}
-              </span>
             </div>
 
-            {/* CONFIGURACIÓN DEL PLAN DE COBROS CON CONSTRAINTS EXACTOS */}
+            <div className="bg-indigo-50/50 p-3 rounded-xl border border-indigo-100/50 flex justify-between items-center mt-auto">
+              <span className="text-[9px] font-black text-indigo-700 uppercase tracking-wider">Total a Cobrar</span>
+              <span className="text-lg font-black text-indigo-900">${totalVenta.toLocaleString('es-AR')}</span>
+            </div>
+
             <div className="space-y-3 pt-2 border-t border-gray-100">
-              <div>
-                <label className="block text-[9px] font-bold text-gray-400 uppercase">Modalidad (`tipo_pago` Check)</label>
-                <select
-                  value={tipoPago} onChange={(e) => setTipoPago(e.target.value)}
-                  className="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs bg-white text-gray-900 font-black focus:outline-none"
-                >
-                  <option value="Unico">📦 Único / Contado</option>
-                  <option value="Semanal">📅 Plan Semanal</option>
-                  <option value="Quincenal">📅 Plan Quincenal</option>
-                  <option value="Mensual">📅 Plan Mensual</option>
-                </select>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[9px] font-bold text-gray-400 uppercase">Modalidad</label>
+                  <select value={tipoPago} onChange={handleCambioTipoPago} className="mt-1 w-full border border-gray-200 rounded-xl px-2 py-2 text-xs font-black bg-white focus:outline-none">
+                    <option value="Unico">Único/Contado</option>
+                    <option value="Semanal">Plan Semanal</option>
+                    <option value="Quincenal">Plan Quincenal</option>
+                    <option value="Mensual">Plan Mensual</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[9px] font-bold text-gray-400 uppercase">Cuotas</label>
+                  <select disabled={tipoPago === 'Unico'} value={cuotasPactadas} onChange={(e) => setCuotasPactadas(e.target.value)} className="mt-1 w-full border border-gray-200 rounded-xl px-2 py-2 text-xs font-black bg-white focus:outline-none disabled:bg-gray-100 disabled:text-gray-400">
+                    <option value="1">1 Pago</option>
+                    <option value="2">2 Cuotas</option>
+                    <option value="3">3 Cuotas</option>
+                    <option value="4">4 Cuotas</option>
+                    <option value="6">6 Cuotas</option>
+                  </select>
+                </div>
               </div>
 
-              <div>
-                <label className="block text-[9px] font-bold text-gray-400 uppercase">Cuotas (`cuotas_pactadas`)</label>
-                <select
-                  value={cuotasPactadas} onChange={(e) => setCuotasPactadas(e.target.value)}
-                  className="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs bg-white text-gray-900 font-black focus:outline-none"
-                >
-                  <option value="1">1 Pago único</option>
-                  <option value="2">2 Cuotas</option>
-                  <option value="3">3 Cuotas</option>
-                  <option value="4">4 Cuotas</option>
-                  <option value="6">6 Cuotas</option>
-                </select>
+              <div className="bg-emerald-50/50 border border-emerald-100 p-3 rounded-xl space-y-3 mt-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    checked={realizaAbono}
+                    onChange={(e) => setRealizaAbono(e.target.checked)}
+                    className="w-4 h-4 text-emerald-600 rounded border-emerald-300 focus:ring-emerald-500 cursor-pointer"
+                  />
+                  <span className="text-[10px] font-black text-emerald-700 uppercase tracking-widest">
+                    💵 ¿Abona dinero en el acto?
+                  </span>
+                </label>
+
+                {realizaAbono && (
+                  <div className="flex gap-2 animate-fade-in">
+                    <input 
+                      type="number" step="0.01" min="0" placeholder="Monto Ej: 5000"
+                      value={montoAbonado} onChange={(e) => setMontoAbonado(e.target.value)}
+                      className="w-1/2 border border-emerald-200 rounded-lg px-2 py-2 text-xs font-mono font-black focus:outline-none focus:border-emerald-500"
+                    />
+                    <select 
+                      value={metodoPagoAbono} onChange={(e) => setMetodoPagoAbono(e.target.value)}
+                      className="w-1/2 border border-emerald-200 rounded-lg px-2 py-2 text-[11px] font-bold bg-white focus:outline-none focus:border-emerald-500"
+                    >
+                      <option value="Efectivo">Efectivo</option>
+                      <option value="Transferencia">Transferencia</option>
+                      <option value="Tarjeta">Tarjeta</option>
+                    </select>
+                  </div>
+                )}
+                
+                {realizaAbono && montoAbonado && parseFloat(montoAbonado) < totalVenta && (
+                  <p className="text-[10px] font-bold text-emerald-800 animate-fade-in">
+                    Deuda pendiente generada: ${(totalVenta - parseFloat(montoAbonado)).toLocaleString('es-AR')}
+                  </p>
+                )}
               </div>
 
-              {mensaje && (
-                <p className={`text-xs font-bold p-3 rounded-xl text-center ${mensaje.startsWith('❌') ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}>
-                  {mensaje}
-                </p>
-              )}
+              {mensaje && <p className={`text-[10px] font-bold p-3 rounded-xl text-center ${mensaje.startsWith('❌') ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}>{mensaje}</p>}
 
-              <button
-                type="button" disabled={cargando || carrito.length === 0} onClick={finalizarVenta}
-                className={`w-full text-white font-black py-3.5 rounded-xl text-xs uppercase tracking-widest shadow-md active:scale-[0.99] transition-transform ${carrito.length === 0 ? 'bg-gray-300 cursor-not-allowed shadow-none' : 'bg-green-600 hover:bg-green-700'}`}
-              >
-                {cargando ? 'Impactando en Supabase...' : '💾 Confirmar Operación'}
+              <button type="button" disabled={cargando || carrito.length === 0} onClick={finalizarVenta} className={`w-full text-white font-black py-3.5 rounded-xl text-xs uppercase tracking-widest shadow-md transition-colors cursor-pointer mt-4 ${carrito.length === 0 ? 'bg-gray-300 cursor-not-allowed shadow-none' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
+                {cargando ? 'Procesando...' : '✔️ CONFIRMAR VENTA'}
               </button>
             </div>
           </section>
         </div>
-
       </main>
 
       <footer className="fixed bottom-0 left-0 right-0 p-3 bg-white/80 backdrop-blur-md border-t border-gray-100 flex justify-center z-10">
-        <a href="/admin" className="w-full max-w-sm text-center bg-gray-800 text-white font-black py-3 rounded-xl text-xs tracking-wider">
-          ⬅️ VOLVER AL PANEL GENERAL
-        </a>
+        <a href="/admin" className="w-full max-w-sm text-center bg-gray-800 text-white font-black py-3 rounded-xl text-xs tracking-wider hover:bg-gray-900 transition-colors">⬅️ VOLVER AL PANEL</a>
       </footer>
-
     </div>
   );
 }

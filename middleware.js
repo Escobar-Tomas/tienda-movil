@@ -1,25 +1,26 @@
 import { NextResponse } from 'next/server';
 
-export default async function middleware(req) {
-  const url = req.nextUrl.clone();
+export function middleware(request) {
+  const { pathname } = request.nextUrl;
 
-  // Si no intenta entrar a /admin, que pase de largo
-  if (!url.pathname.startsWith('/admin')) {
-    return NextResponse.next();
+  // 1. Interceptamos SOLO las rutas que intentan entrar al panel de administración
+  if (pathname.startsWith('/admin')) {
+    
+    // Buscamos la cookie segura que generó nuestro authService
+    const sessionCookie = request.cookies.get('sb_session');
+
+    // 2. Si la cookie NO existe, lo pateamos a la pantalla de Login
+    if (!sessionCookie) {
+      const loginUrl = new URL('/login', request.url);
+      return NextResponse.redirect(loginUrl);
+    }
   }
 
-  // Buscamos nuestra cookie manual e inequívoca
-  const tieneSesion = req.cookies.get('session_secreta')?.value;
-
-  // Si no existe, rebote inmediato al login
-  if (!tieneSesion) {
-    url.pathname = '/login';
-    return NextResponse.redirect(url);
-  }
-
+  // 3. Si tiene la cookie, lo dejamos pasar libremente
   return NextResponse.next();
 }
 
+// Configuramos el matcher para que el middleware se ejecute estrictamente donde lo necesitamos
 export const config = {
   matcher: ['/admin/:path*'],
 };
