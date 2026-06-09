@@ -130,8 +130,7 @@ export default function CatalogoPublico() {
     mensajeWA += `*Total estimado: $${totalCarrito.toLocaleString("es-AR")}*\n\n`;
     mensajeWA += `¿Tienen disponibilidad para coordinar la entrega?`;
 
-    // RECUERDA: Coloca tu número de WhatsApp real aquí
-    const numeroWhatsApp = "5493815555555";
+    const numeroWhatsApp = process.env.NEXT_PUBLIC_TELEFONO_VENDEDOR;
     const url = `https://wa.me/${numeroWhatsApp}?text=${encodeURIComponent(mensajeWA)}`;
     window.open(url, "_blank");
   };
@@ -453,7 +452,7 @@ export default function CatalogoPublico() {
                 mensajeWA += `\n📍 *Zona:* ${zona}\n💳 *Pago:* ${pago}\n`;
                 mensajeWA += `\n💰 *Total:* $${totalCarrito.toLocaleString("es-AR")}`;
 
-                const numeroWhatsApp = "5493815555555";
+                const numeroWhatsApp = process.env.NEXT_PUBLIC_TELEFONO_VENDEDOR;
                 window.open(
                   `https://wa.me/${numeroWhatsApp}?text=${encodeURIComponent(mensajeWA)}`,
                   "_blank",
