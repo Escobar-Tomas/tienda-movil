@@ -11,19 +11,25 @@ export const dashboardService = {
 
     if (errClientes) throw errClientes;
 
-    // 2. Calcular Ventas y Deudas
-    const { data: ventas, error: errVentas } = await supabase.from('ventas').select('total, fecha_venta');
+    // 2. Calcular Ventas y Deudas (EXCLUYENDO devoluciones y cancelaciones)
+    const { data: ventas, error: errVentas } = await supabase
+      .from('ventas')
+      .select('total, fecha_venta, estado')
+      .not('estado', 'in', '("Devuelta","Cancelada")');
+
     if (errVentas) throw errVentas;
 
     const { data: pagos, error: errPagos } = await supabase.from('pagos').select('monto_pagado');
     if (errPagos) throw errPagos;
 
-    const totalVentasHistorial = ventas?.reduce((acc, v) => acc + parseFloat(v.total), 0) || 0;
+    // Sumatoria total histórica válida
+    const totalVentasValidas = ventas?.reduce((acc, v) => acc + parseFloat(v.total), 0) || 0;
     const totalPagado = pagos?.reduce((acc, p) => acc + parseFloat(p.monto_pagado), 0) || 0;
     
-    const dineroEnLaCalle = totalVentasHistorial - totalPagado;
+    // Lo que falta cobrar de las ventas que siguen en pie
+    const dineroEnLaCalle = totalVentasValidas - totalPagado;
 
-    // Calcular solo las ventas del mes actual
+    // Calcular solo las ventas válidas del mes actual
     const mesActual = new Date().getMonth();
     const añoActual = new Date().getFullYear();
     const ventasDelMes = ventas?.filter(v => {
@@ -31,22 +37,10 @@ export const dashboardService = {
       return fecha.getMonth() === mesActual && fecha.getFullYear() === añoActual;
     }).reduce((acc, v) => acc + parseFloat(v.total), 0) || 0;
 
-    // 3. Alerta de Stock Crítico (3 unidades o menos)
-    const { data: stockCritico, error: errStock } = await supabase
-      .from('stock_variantes')
-      .select(`id, talle, stock, productos!inner(titulo, activo)`)
-      .eq('productos.activo', true)
-      .lte('stock', 3)
-      .order('stock', { ascending: true })
-      .limit(6);
-
-    if (errStock) throw errStock;
-
     return {
       clientesActivos: clientesCount || 0,
       ventasMes: ventasDelMes,
-      dineroEnLaCalle: dineroEnLaCalle > 0 ? dineroEnLaCalle : 0,
-      alertasStock: stockCritico || []
+      dineroEnLaCalle: dineroEnLaCalle > 0 ? dineroEnLaCalle : 0
     };
   }
 };
