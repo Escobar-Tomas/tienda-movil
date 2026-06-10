@@ -1,26 +1,53 @@
+import { createServerClient } from '@supabase/ssr';
 import { NextResponse } from 'next/server';
 
-export function middleware(request) {
-  const { pathname } = request.nextUrl;
+export async function middleware(request) {
+  // Inicializamos la respuesta que vamos a ir modificando
+  let response = NextResponse.next({
+    request: {
+      headers: request.headers,
+    },
+  });
 
-  // 1. Interceptamos SOLO las rutas que intentan entrar al panel de administración
-  if (pathname.startsWith('/admin')) {
-    
-    // Buscamos la cookie segura que generó nuestro authService
-    const sessionCookie = request.cookies.get('sb_session');
+  // Creamos el cliente de servidor de Supabase
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll();
+        },
+        setAll(cookiesToSet) {
+          // Actualizamos las cookies en la petición y en la respuesta simultáneamente
+          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
+          response = NextResponse.next({
+            request,
+          });
+          cookiesToSet.forEach(({ name, value, options }) =>
+            response.cookies.set(name, value, options)
+          );
+        },
+      },
+    }
+  );
 
-    // 2. Si la cookie NO existe, lo pateamos a la pantalla de Login
-    if (!sessionCookie) {
+  // Intentamos obtener el usuario de manera segura. 
+  // Esto valida el token contra el servidor y no solo confía en la cookie.
+  const { data: { user } } = await supabase.auth.getUser();
+
+  // Protegemos SOLO las rutas que intentan entrar al panel de administración
+  if (request.nextUrl.pathname.startsWith('/admin')) {
+    // Si no hay usuario válido, lo pateamos al Login
+    if (!user) {
       const loginUrl = new URL('/login', request.url);
       return NextResponse.redirect(loginUrl);
     }
   }
 
-  // 3. Si tiene la cookie, lo dejamos pasar libremente
-  return NextResponse.next();
+  return response;
 }
 
-// Configuramos el matcher para que el middleware se ejecute estrictamente donde lo necesitamos
 export const config = {
   matcher: ['/admin/:path*'],
 };
