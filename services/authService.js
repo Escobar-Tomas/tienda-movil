@@ -22,8 +22,6 @@ export const authService = {
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
     
-    // Eliminamos la cookie local
-    document.cookie = 'sb_session=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;';
     return true;
   },
 
